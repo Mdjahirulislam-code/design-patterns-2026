@@ -1,0 +1,17 @@
+### Smart Greenhouse API — quick checks
+### Requires the "REST Client" extension (humao.rest-client).
+### Click "Send Request" above each block.
+
+### Health: should return {"status":"ok","db":"ok"}
+GET http://localhost:8000/health
+Accept: application/json
+
+### Discovery payload
+GET http://localhost:8000/
+Accept: application/json
+
+### OpenAPI schema
+GET http://localhost:8000/openapi.json
+
+### Swagger must NOT exist -> expect 404
+GET http://localhost:8000/docs
