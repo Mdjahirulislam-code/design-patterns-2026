@@ -5,7 +5,7 @@ phases 13–14 are optional enrichment.
 
 | Phase | Pattern / focus | Database (cumulative) | Status |
 |------:|-----------------|-----------------------|--------|
-| 01 | Skeleton (no pattern) | Tooling only; DB reachable | ✅ done |
+| 01 | Skeleton (no pattern) | Tooling only; DB reachable |  done |
 | 02 | Factory Method | `devices` (sensors) | |
 | 03 | Abstract Factory | `device_family`, actuator rows | |
 | 04 | Builder | `locations`, `zones`, config fields | |
