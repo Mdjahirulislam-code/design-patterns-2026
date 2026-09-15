@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Phase 2: Docker up",
+      "type": "shell",
+      "command": "docker compose up --build -d",
+      "problemMatcher": []
+    },
+    {
+      "label": "Phase 2: Alembic upgrade",
+      "type": "shell",
+      "command": "docker compose exec backend alembic upgrade head",
+      "problemMatcher": []
+    },
+    {
+      "label": "Phase 2: Backend tests",
+      "type": "shell",
+      "command": "docker compose exec backend pytest tests -q",
+      "problemMatcher": []
+    },
+    {
+      "label": "Phase 2: Frontend build",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "problemMatcher": []
+    }
+  ]
+}
