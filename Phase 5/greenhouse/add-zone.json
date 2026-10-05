@@ -1,0 +1,8 @@
+{
+  "name": "Zone 2",
+  "moisture_threshold_low": 0.25,
+  "moisture_threshold_high": 0.50,
+  "schedule": {
+    "watering": "09:00"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "location_name": "Lab Site A",
+  "zones": [
+    {
+      "name": "Zone 1",
+      "moisture_threshold_low": 0.2,
+      "moisture_threshold_high": 0.45,
+      "schedule": {
+        "watering": "08:00"
+      }
+    }
+  ]
+}
