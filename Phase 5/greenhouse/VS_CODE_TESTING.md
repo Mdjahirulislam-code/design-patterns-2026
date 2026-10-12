@@ -1,4 +1,4 @@
-# Phase 4 — VS Code Testing Guide  
+# Phase 5 — VS Code Testing Guide  
 ## Smart Greenhouse System
 
 ---
@@ -72,7 +72,7 @@ docker compose exec backend alembic current
 Expected:
 
 ```
-(head)
+006 (head)
 ```
 
 ---
@@ -310,9 +310,94 @@ Expected:
 
 ---
 
+# Sensor Reading Testing (Phase 5 — Adapter)
+
+## 13. Read a Sensor
+
+Get a sensor id:
+
+```
+GET /api/sensors
+```
+
+Read the sensor now:
+
+```
+POST /api/sensors/{sensor_id}/read
+```
+
+Expected: `201 Created`
+
+```json
+{
+  "device_id": "<uuid>",
+  "value": 0.31,
+  "unit": "vwc",
+  "source": "simulation",
+  "recorded_at": "2026-10-13T09:00:00Z"
+}
+```
+
+Verify:
+
+- Moisture values are between 0.2 and 0.6 vwc
+- Light values are between 200 and 2000 lux
+- A vendor sensor ("Add vendor moisture" button) returns `"source": "vendor"`
+- A missing device returns `404`
+
+List stored readings, newest first:
+
+```
+GET /api/sensors/{sensor_id}/readings?limit=5
+```
+
+---
+
+## 14. Test Sampling Settings
+
+Update interval and tracking:
+
+```
+PATCH /api/devices/{device_id}/sampling
+```
+
+Example body (sampling.json):
+
+```json
+{
+  "sampling_interval_seconds": 10,
+  "tracking_enabled": true
+}
+```
+
+Verify:
+
+- Settings are saved and returned
+- An interval below 5 (bad-sampling.json) returns `400` with "must be at least 5"
+- With tracking on, new readings appear on their own after the interval
+- With tracking off, no new readings are added by the sampler
+
+---
+
+## 15. Check Readings in the Database
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d sensor_readings"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT source, count(*) FROM sensor_readings GROUP BY source;"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT display_name, sampling_interval_seconds, tracking_enabled FROM devices;"
+```
+
+Expected:
+
+- `sensor_readings` has a foreign key to `devices`
+- Index on `(device_id, recorded_at DESC)`
+- Every device has an interval and a tracking value
+
+---
+
 # Frontend Testing
 
-## 13. Test Dashboard
+## 16. Test Dashboard
 
 Open:
 
@@ -328,12 +413,15 @@ Verify:
  Simulation devices display  
  Device information displays correctly  
  Saved data remains after refresh  
+ Sensor cards show latest value and source badge  
+ "Read now" stores a new reading  
+ Interval and tracking can be changed on each sensor card  
 
 ---
 
 # Database Verification
 
-## 14. Check Database Records
+## 17. Check Database Records
 
 Devices:
 
@@ -353,11 +441,17 @@ Zones:
 docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM zones;"
 ```
 
+Sensor readings:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM sensor_readings ORDER BY recorded_at DESC LIMIT 10;"
+```
+
 ---
 
 # Quality Checks
 
-## 15. Backend Tests
+## 18. Backend Tests
 
 Run:
 
@@ -368,12 +462,12 @@ docker compose exec backend pytest tests -q
 Expected:
 
 ```
-All tests passed
+All tests passed, none skipped
 ```
 
 ---
 
-## 16. Backend Lint
+## 19. Backend Lint
 
 Run:
 
@@ -383,7 +477,7 @@ docker compose exec backend ruff check src alembic tests
 
 ---
 
-## 17. Frontend Check
+## 20. Frontend Check
 
 Go to frontend:
 
@@ -411,10 +505,12 @@ npm run lint
 
 ---
 
-# Phase 4 Final Checklist
+# Phase 5 Final Checklist
+
+## Phases 1–4
 
 ☑ Docker services running  
-☑ Database migration completed  
+☑ Database migration completed (006 head)  
 ☑ Backend health check passes  
 ☑ Scalar API documentation works  
 ☑ Device API works  
@@ -426,7 +522,22 @@ npm run lint
 ☑ Zone device listing works  
 ☑ PostgreSQL stores data correctly  
 ☑ Frontend dashboard works  
+
+## Phase 5 — Adapter
+
+☑ "Read now" stores a reading and returns 201  
+☑ Reading shows value, unit, source and time  
+☑ Simulation and vendor adapters give different sources  
+☑ Missing device returns 404  
+☑ Sampling interval and tracking are saved  
+☑ Interval below 5 returns 400  
+☑ Sampler adds readings only when tracking is on  
+☑ Latest reading stays after refresh  
+☑ `sensor_readings` table has foreign key and index  
+
+## Quality
+
 ☑ Backend tests pass  
 ☑ Frontend build passes  
 
-# Phase 4 Complete 
+# Phase 5 Complete
