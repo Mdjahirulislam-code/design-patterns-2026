@@ -1,0 +1,621 @@
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+
+async function request<T>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+
+  const response = await fetch(
+    `${API_BASE_URL}${path}`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+      ...options,
+    }
+  );
+
+
+  if (!response.ok) {
+
+    // FastAPI puts the reason in "detail" - show it instead of only the code
+    let detail = "";
+
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") {
+        detail = body.detail;
+      }
+    } catch {
+      // response had no JSON body
+    }
+
+    throw new Error(
+      detail || `API error ${response.status}`
+    );
+  }
+
+
+  return response.json();
+}
+
+
+
+/* =========================
+   Health
+========================= */
+
+export interface HealthResponse {
+  status: string;
+  db: string;
+}
+
+
+export function fetchHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>("/health");
+}
+
+
+
+/* =========================
+   Phase 2 Sensors
+========================= */
+
+export interface SensorDto {
+
+  id: string;
+
+  // Phase 2 + Phase 3 compatible fields
+  device_type: string;
+
+  role: string;
+
+  device_family: string;
+
+  display_name: string;
+
+  default_config: Record<string, unknown>;
+
+  zone_id: string | null;
+
+  // Phase 5: sampling columns (source of truth, not default_config)
+  sampling_interval_seconds: number;
+
+  tracking_enabled: boolean;
+
+}
+
+
+
+export function fetchSensors(): Promise<SensorDto[]> {
+
+  return request<SensorDto[]>(
+    "/api/sensors"
+  );
+
+}
+
+
+
+export type SensorAdapter =
+  | "simulation"
+  | "vendor";
+
+
+export function createSensor(
+  sensorType: "moisture" | "light",
+  adapter: SensorAdapter = "simulation"
+): Promise<SensorDto> {
+
+  return request<SensorDto>(
+    "/api/sensors",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        type: sensorType,
+        adapter,
+      }),
+    }
+  );
+
+}
+
+
+
+/* =========================
+   Phase 5 Readings + sampling
+========================= */
+
+export type ReadingSource =
+  | "simulation"
+  | "mqtt"
+  | "vendor";
+
+
+export interface ReadingDto {
+
+  device_id: string;
+
+  value: number;
+
+  unit: string;
+
+  source: ReadingSource;
+
+  recorded_at: string;
+
+}
+
+
+export interface SamplingDto {
+
+  device_id: string;
+
+  sampling_interval_seconds: number;
+
+  tracking_enabled: boolean;
+
+}
+
+
+// Runs the sensor adapter, stores the reading and returns it
+export function readSensorNow(
+  sensorId: string
+): Promise<ReadingDto> {
+
+  return request<ReadingDto>(
+    `/api/sensors/${sensorId}/read`,
+    {
+      method: "POST",
+    }
+  );
+
+}
+
+
+// Stored readings, newest first
+export function fetchReadings(
+  sensorId: string,
+  limit = 20
+): Promise<ReadingDto[]> {
+
+  return request<ReadingDto[]>(
+    `/api/sensors/${sensorId}/readings?limit=${limit}`
+  );
+
+}
+
+
+export function updateSampling(
+  deviceId: string,
+  body: {
+    sampling_interval_seconds: number;
+    tracking_enabled: boolean;
+  }
+): Promise<SamplingDto> {
+
+  return request<SamplingDto>(
+    `/api/devices/${deviceId}/sampling`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }
+  );
+
+}
+
+
+
+/* =========================
+   Phase 3 Devices
+========================= */
+
+
+export type DeviceFamily =
+  | "simulation"
+  | "edge";
+
+
+export type DeviceRole =
+  | "sensor"
+  | "actuator";
+
+
+
+export interface DeviceDto {
+
+  id: string;
+
+  device_type: string;
+
+  role: DeviceRole;
+
+  device_family: DeviceFamily;
+
+  display_name: string;
+
+  default_config: Record<string, unknown>;
+
+  zone_id?: string | null;
+
+  sampling_interval_seconds?: number;
+
+  tracking_enabled?: boolean;
+
+  // Phase 8: actuators only (null / empty for sensors)
+  state?: ActuatorStateName | null;
+
+  allowed_commands?: string[];
+
+}
+
+
+
+
+export function fetchDevices(
+  params?: {
+    family?: DeviceFamily;
+    role?: DeviceRole;
+  }
+
+): Promise<DeviceDto[]> {
+
+
+  const query =
+    new URLSearchParams();
+
+
+  if (params?.family) {
+
+    query.append(
+      "family",
+      params.family
+    );
+
+  }
+
+
+  if (params?.role) {
+
+    query.append(
+      "role",
+      params.role
+    );
+
+  }
+
+
+
+  const url =
+    query.toString()
+      ? `/api/devices?${query.toString()}`
+      : "/api/devices";
+
+
+
+  return request<DeviceDto[]>(
+    url
+  );
+
+}
+
+
+
+
+export function provisionDeviceFamily(
+  family: DeviceFamily
+
+): Promise<DeviceDto[]> {
+
+
+  return request<DeviceDto[]>(
+    `/api/devices/provision?family=${family}`,
+    {
+      method: "POST",
+    }
+  );
+
+}
+
+
+
+/* =========================
+   Phase 4 Locations (read only here)
+========================= */
+
+export interface LocationSummaryDto {
+
+  id: string;
+
+  name: string;
+
+}
+
+
+export function fetchLocations(): Promise<LocationSummaryDto[]> {
+
+  return request<LocationSummaryDto[]>(
+    "/api/locations"
+  );
+
+}
+
+
+
+/* =========================
+   Phase 6 Automation strategy
+========================= */
+
+export type AutomationAction =
+  | "irrigate"
+  | "wait";
+
+
+export interface StrategyOptionDto {
+
+  key: string;
+
+  label: string;
+
+  description: string;
+
+}
+
+
+export interface AutomationRuleDto {
+
+  location_id: string;
+
+  strategy_key: string;
+
+  // true when nothing is saved yet and the default is used
+  is_default: boolean;
+
+  updated_at: string | null;
+
+}
+
+
+export interface ZoneRecommendationDto {
+
+  zone_id: string;
+
+  zone_name: string;
+
+  action: AutomationAction;
+
+  reason: string;
+
+  score: number | null;
+
+  moisture: number | null;
+
+  light: number | null;
+
+  moisture_threshold_low: number;
+
+  moisture_threshold_high: number;
+
+}
+
+
+export interface RecommendationDto {
+
+  location_id: string;
+
+  strategy_key: string;
+
+  action: AutomationAction;
+
+  reason: string;
+
+  evaluated_at: string;
+
+  zones: ZoneRecommendationDto[];
+
+}
+
+
+export function fetchStrategies(): Promise<StrategyOptionDto[]> {
+
+  return request<StrategyOptionDto[]>(
+    "/api/automation/strategies"
+  );
+
+}
+
+
+export function fetchAutomationRule(
+  locationId: string
+): Promise<AutomationRuleDto> {
+
+  return request<AutomationRuleDto>(
+    `/api/locations/${locationId}/automation`
+  );
+
+}
+
+
+export function saveStrategy(
+  locationId: string,
+  strategyKey: string
+): Promise<AutomationRuleDto> {
+
+  return request<AutomationRuleDto>(
+    `/api/locations/${locationId}/automation`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        strategy_key: strategyKey,
+      }),
+    }
+  );
+
+}
+
+
+// Uses the strategy SAVED for the location, not the dropdown value
+export function evaluateLocation(
+  locationId: string
+): Promise<RecommendationDto> {
+
+  return request<RecommendationDto>(
+    `/api/locations/${locationId}/automation/evaluate`,
+    {
+      method: "POST",
+    }
+  );
+
+}
+
+
+
+/* =========================
+   Phase 7 Location overview (Facade)
+========================= */
+
+export interface OverviewDeviceDto {
+
+  id: string;
+
+  device_type: string;
+
+  role: string;
+
+  display_name: string;
+
+  // Phase 8: actuators only (null / empty for sensors)
+  state: ActuatorStateName | null;
+
+  allowed_commands: string[];
+
+}
+
+
+export interface OverviewReadingDto {
+
+  device_id: string;
+
+  value: number;
+
+  unit: string;
+
+  recorded_at: string;
+
+  // copied from the device
+  tracking_enabled: boolean;
+
+  sampling_interval_seconds: number;
+
+}
+
+
+export interface OverviewZoneDto {
+
+  id: string;
+
+  name: string;
+
+  moisture_threshold_low: number;
+
+  moisture_threshold_high: number;
+
+  devices: OverviewDeviceDto[];
+
+  latest_readings: OverviewReadingDto[];
+
+}
+
+
+export interface LocationOverviewDto {
+
+  location: {
+    id: string;
+    name: string;
+  };
+
+  // assigned devices only
+  device_counts: {
+    sensor: number;
+    actuator: number;
+  };
+
+  zones: OverviewZoneDto[];
+
+  // null when no strategy is saved
+  strategy_key: string | null;
+
+  last_recommendation: {
+    action: AutomationAction;
+    reason: string;
+  } | null;
+
+}
+
+
+// One call gives the whole overview snapshot
+export function fetchOverview(
+  locationId: string
+): Promise<LocationOverviewDto> {
+
+  return request<LocationOverviewDto>(
+    `/api/locations/${locationId}/overview`
+  );
+
+}
+
+
+
+/* =========================
+   Phase 8 Actuator state (State)
+========================= */
+
+export type ActuatorStateName =
+  | "off"
+  | "idle"
+  | "running"
+  | "error"
+  | "maintenance";
+
+
+// Names only, for the demo "Move to" list. Which moves are legal is decided by
+// the backend (domain/actuators/state.py), never here.
+export const ACTUATOR_STATES: ActuatorStateName[] = [
+  "off",
+  "idle",
+  "running",
+  "error",
+  "maintenance",
+];
+
+
+export interface ActuatorStateDto {
+
+  device_id: string;
+
+  state: ActuatorStateName;
+
+  allowed_commands: string[];
+
+  updated_at: string | null;
+
+}
+
+
+// Demo transition. An illegal move is answered with 409 and the reason.
+export function transitionActuator(
+  deviceId: string,
+  target: ActuatorStateName
+): Promise<ActuatorStateDto> {
+
+  return request<ActuatorStateDto>(
+    `/api/devices/${deviceId}/transition`,
+    {
+      method: "POST",
+      body: JSON.stringify({ target }),
+    }
+  );
+
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Wrong Zone",
+  "moisture_threshold_low": 0.8,
+  "moisture_threshold_high": 0.2,
+  "schedule": {}
+}
