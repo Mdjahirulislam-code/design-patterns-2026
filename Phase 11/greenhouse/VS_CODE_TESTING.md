@@ -1,0 +1,1100 @@
+# Phase 11 — VS Code Testing Guide  
+## Smart Greenhouse System
+
+---
+
+## 1. Open Project
+
+Open the project folder in VS Code.
+
+Project structure:
+
+```
+docker-compose.yml
+backend/
+frontend/
+docs/
+```
+
+---
+
+## 2. Setup Environment
+
+Open terminal in project root.
+
+Create environment files:
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item .env backend\.env
+```
+
+---
+
+## 3. Start Application
+
+Make sure Docker Desktop is running.
+
+Build and start all services:
+
+```powershell
+docker compose up --build -d
+```
+
+Check running containers:
+
+```powershell
+docker compose ps
+```
+
+Expected services:
+
+- PostgreSQL
+- Backend
+- Frontend
+
+---
+
+## 4. Database Migration
+
+Apply database migration:
+
+```powershell
+docker compose exec backend alembic upgrade head
+```
+
+Check migration status:
+
+```powershell
+docker compose exec backend alembic current
+```
+
+Expected:
+
+```
+011 (head)
+```
+
+---
+
+## 5. Check Application URLs
+
+Open the following:
+
+Backend health:
+
+```
+http://localhost:8000/health
+```
+
+API documentation:
+
+```
+http://localhost:8000/scalar
+```
+
+Frontend dashboard:
+
+```
+http://localhost:5173/dashboard
+```
+
+Expected health response:
+
+```json
+{
+  "status": "ok",
+  "db": "ok"
+}
+```
+
+---
+
+# API Testing
+
+## 6. Test Device API
+
+Open Scalar:
+
+```
+http://localhost:8000/scalar
+```
+
+Test:
+
+```
+GET /api/devices
+```
+
+Expected:
+
+- Sensors are returned
+- Actuators are returned
+- Device family information is shown
+
+Example:
+
+```json
+{
+  "device_type": "moisture_sensor",
+  "role": "sensor",
+  "device_family": "simulation"
+}
+```
+
+---
+
+## 7. Test Device Factory
+
+Verify Factory Method device creation.
+
+Simulation devices:
+
+### Sensors
+
+- Soil moisture sensor
+- Greenhouse light sensor
+
+### Actuators
+
+- Irrigation pump
+- Grow light
+
+
+Check:
+
+```
+GET /api/devices
+```
+
+Verify devices are loaded correctly.
+
+---
+
+# Location and Zone Testing
+
+## 8. Create Location Configuration
+
+Test:
+
+```
+POST /api/locations/config
+```
+
+Example body:
+
+```json
+{
+  "location_name": "Lab Site A",
+  "zones": [
+    {
+      "name": "Zone 1",
+      "moisture_threshold_low": 0.2,
+      "moisture_threshold_high": 0.45,
+      "schedule": {
+        "watering": "08:00"
+      }
+    }
+  ]
+}
+```
+
+Verify:
+
+- Location created
+- Zone created
+- Configuration saved in database
+
+---
+
+## 9. Test Location Configuration API
+
+Get location configuration:
+
+```
+GET /api/locations/{location_id}/config
+```
+
+Check:
+
+- Location information
+- Zone information
+- Moisture thresholds
+- Watering schedule
+
+---
+
+## 10. Test Zone Management
+
+Add zone:
+
+```
+POST /api/locations/{location_id}/zones
+```
+
+Update zone:
+
+```
+PATCH /api/locations/{location_id}/zones/{zone_id}
+```
+
+Delete zone:
+
+```
+DELETE /api/locations/{location_id}/zones/{zone_id}
+```
+
+Verify:
+
+- Zone creation works
+- Zone update works
+- Zone deletion works
+
+---
+
+# Device Assignment Testing
+
+## 11. Assign Device to Zone
+
+Assign device:
+
+```
+PATCH /api/devices/{device_id}/zone
+```
+
+Example:
+
+```json
+{
+  "zone_id": "zone_uuid"
+}
+```
+
+Verify database:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT id,device_type,zone_id,location_id FROM devices;"
+```
+
+Expected:
+
+```
+device_id | device_type | zone_id | location_id
+```
+
+Assigned devices should contain:
+
+- zone_id
+- location_id
+
+---
+
+## 12. Test Zone Device Listing
+
+Check devices inside a zone:
+
+```
+GET /api/locations/{location_id}/zones/{zone_id}/devices
+```
+
+Expected:
+
+```json
+[
+  {
+    "device_type": "moisture_sensor",
+    "role": "sensor"
+  }
+]
+```
+
+---
+
+# Sensor Reading Testing (Phase 5 — Adapter)
+
+## 13. Read a Sensor
+
+Get a sensor id:
+
+```
+GET /api/sensors
+```
+
+Read the sensor now:
+
+```
+POST /api/sensors/{sensor_id}/read
+```
+
+Expected: `201 Created`
+
+```json
+{
+  "device_id": "<uuid>",
+  "value": 0.31,
+  "unit": "vwc",
+  "source": "simulation",
+  "recorded_at": "2026-10-13T09:00:00Z"
+}
+```
+
+Verify:
+
+- Moisture values are between 0.2 and 0.6 vwc
+- Light values are between 200 and 2000 lux
+- A vendor sensor ("Add vendor moisture" button) returns `"source": "vendor"`
+- A missing device returns `404`
+
+List stored readings, newest first:
+
+```
+GET /api/sensors/{sensor_id}/readings?limit=5
+```
+
+---
+
+## 14. Test Sampling Settings
+
+Update interval and tracking:
+
+```
+PATCH /api/devices/{device_id}/sampling
+```
+
+Example body (sampling.json):
+
+```json
+{
+  "sampling_interval_seconds": 10,
+  "tracking_enabled": true
+}
+```
+
+Verify:
+
+- Settings are saved and returned
+- An interval below 5 (bad-sampling.json) returns `400` with "must be at least 5"
+- With tracking on, new readings appear on their own after the interval
+- With tracking off, no new readings are added by the sampler
+
+---
+
+## 15. Check Readings in the Database
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d sensor_readings"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT source, count(*) FROM sensor_readings GROUP BY source;"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT display_name, sampling_interval_seconds, tracking_enabled FROM devices;"
+```
+
+Expected:
+
+- `sensor_readings` has a foreign key to `devices`
+- Index on `(device_id, recorded_at DESC)`
+- Every device has an interval and a tracking value
+
+---
+
+# Automation Strategy Testing (Phase 6 — Strategy)
+
+## 16. Prepare Data
+
+The location needs a zone with a moisture sensor and a stored reading.
+
+1. Create a location if there is none (section 8)
+2. Get the zone id with `GET /api/locations/{location_id}/config`
+3. Assign a moisture sensor to that zone (section 11)
+4. Read the sensor (section 13)
+
+---
+
+## 17. Test Strategy API
+
+List strategies:
+
+```
+GET /api/automation/strategies
+```
+
+Expected: `conservative` and `aggressive`
+
+Get the saved strategy of a location:
+
+```
+GET /api/locations/{location_id}/automation
+```
+
+Before anything is saved, `"strategy_key": "conservative"` and `"is_default": true` are returned.
+
+Save a strategy:
+
+```
+PUT /api/locations/{location_id}/automation
+```
+
+Example body (strategy.json):
+
+```json
+{
+  "strategy_key": "aggressive"
+}
+```
+
+Evaluate with the saved strategy:
+
+```
+POST /api/locations/{location_id}/automation/evaluate
+```
+
+Expected:
+
+```json
+{
+  "location_id": "<uuid>",
+  "strategy_key": "aggressive",
+  "action": "irrigate",
+  "reason": "Moisture 0.33 is below the high threshold 0.50, topping up early",
+  "zones": [ ... ]
+}
+```
+
+Verify:
+
+- With moisture inside the zone band, conservative returns `wait` and aggressive returns `irrigate`
+- A zone without a moisture sensor returns `wait` with "No moisture sensor in this zone"
+- An unknown strategy (bad-strategy.json) returns `400`
+- A missing location returns `404`
+
+---
+
+## 18. Check Strategy in the Database
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d automation_rules"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT location_id, strategy_key, updated_at FROM automation_rules;"
+```
+
+Expected:
+
+- One row per location (unique `location_id`)
+- `strategy_key` changes when a new strategy is saved
+
+---
+
+# Location Overview Testing (Phase 7 — Facade)
+
+## 19. Test Overview API
+
+Get the overview of a location:
+
+```
+GET /api/locations/{location_id}/overview
+```
+
+Expected: `200 OK`
+
+```json
+{
+  "location": { "id": "<uuid>", "name": "Lab Site A" },
+  "device_counts": { "sensor": 1, "actuator": 0 },
+  "zones": [
+    {
+      "id": "<uuid>",
+      "name": "Zone 2",
+      "moisture_threshold_low": 0.25,
+      "moisture_threshold_high": 0.5,
+      "devices": [ { "id": "<uuid>", "device_type": "moisture_sensor", "role": "sensor", "display_name": "Soil moisture sensor" } ],
+      "latest_readings": [ { "device_id": "<uuid>", "value": 0.33, "unit": "vwc", "recorded_at": "...", "tracking_enabled": true, "sampling_interval_seconds": 300 } ]
+    }
+  ],
+  "strategy_key": "aggressive",
+  "last_recommendation": { "action": "irrigate", "reason": "..." }
+}
+```
+
+Verify:
+
+- Every zone of the location is listed, also a zone without devices
+- `device_counts` only counts devices assigned to a zone
+- Unassigned devices do not appear in any zone
+- A device without a reading is in `devices` but not in `latest_readings`
+- Without a saved strategy, `strategy_key` and `last_recommendation` are `null` and the status is still `200`
+- `last_recommendation` matches `POST /api/locations/{location_id}/automation/evaluate`
+- A missing location returns `404`
+
+---
+
+## 20. Check That the Overview Follows the Database
+
+1. Run `POST /api/sensors/{sensor_id}/read` on a sensor in the zone
+2. Get the overview again: the new value is shown
+3. Save another strategy with `PUT /api/locations/{location_id}/automation`
+4. Get the overview again: `strategy_key` and `last_recommendation` have changed
+
+No new table is used. Check that the schema did not change:
+
+```powershell
+docker compose exec backend alembic current
+```
+
+Expected: Phase 7 added no table. With all later phases applied the head is `011 (head)`.
+
+---
+
+# Actuator State Testing (Phase 8 — State)
+
+## 21. Test Actuator State API
+
+Get the actuators. If there are none, provision the simulation family first (`POST /api/devices/provision?family=simulation`).
+
+```
+GET /api/devices?role=actuator
+```
+
+Expected: every actuator has `state` and `allowed_commands`. Sensors have `"state": null` and `"allowed_commands": []`.
+
+```json
+{
+  "id": "<uuid>",
+  "role": "actuator",
+  "state": "idle",
+  "allowed_commands": ["start_pump", "set_light_level", "power_off", "begin_maintenance", "report_fault"]
+}
+```
+
+Read one actuator's state:
+
+```
+GET /api/devices/{device_id}/state
+```
+
+Move it (transition.json):
+
+```
+POST /api/devices/{device_id}/transition
+```
+
+```json
+{ "target": "running" }
+```
+
+Verify:
+
+- idle → running returns `200` with `"allowed_commands": ["stop_pump", "set_light_level", "report_fault"]`
+- running → maintenance (bad-transition.json) returns `409` with the reason and the allowed commands
+- An unknown target such as `"flying"` returns `400`
+- A sensor id or a missing id returns `404`
+
+---
+
+## 22. Check State in the Database
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d actuator_states"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT device_id, state, updated_at FROM actuator_states;"
+```
+
+Expected:
+
+- One row per actuator
+- After a legal move, `state` and `updated_at` change
+- After an illegal move, the row stays the same
+
+Restart the backend and check again:
+
+```powershell
+docker compose restart backend
+```
+
+The states are still the same.
+
+---
+
+# Actuator Execution Log Testing (Phase 9 — Decorator)
+
+## 23. Test Execution Log API
+
+Apply a command to an actuator (apply.json). The command is not validated in this phase.
+
+```
+POST /api/actuators/{device_id}/apply
+```
+
+```json
+{ "command": "start", "payload": {} }
+```
+
+Expected: `200 OK` with the row that was written
+
+```json
+{
+  "id": "<uuid>",
+  "device_id": "<uuid>",
+  "success": true,
+  "policy_applied": ["logging"],
+  "message": null,
+  "created_at": "..."
+}
+```
+
+List the newest rows:
+
+```
+GET /api/actuators/executions?limit=20
+```
+
+Verify:
+
+- Every apply adds one row, newest first
+- An unknown command such as `"fly"` on an idle actuator still succeeds
+- A sensor id or a missing id returns `404` and adds no row
+- An empty command returns `400` and adds a row with `"success": false`
+
+---
+
+## 24. Test a Blocked Attempt (Max Run Time)
+
+1. Move the actuator to running (section 21, transition.json)
+2. Move its `updated_at` 31 minutes back:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "UPDATE actuator_states SET updated_at = now() - interval '31 minutes' WHERE state = 'running';"
+```
+
+3. Apply a command again:
+
+```
+POST /api/actuators/{device_id}/apply
+```
+
+Expected: `409 Conflict` with `"detail": "Max run time exceeded"`
+
+4. List the executions. The newest row is:
+
+```json
+{
+  "success": false,
+  "policy_applied": ["maxRunTime", "logging"],
+  "message": "Max run time exceeded"
+}
+```
+
+Check the table:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d actuator_execution_log"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT success, policy_applied, message, created_at FROM actuator_execution_log ORDER BY created_at DESC LIMIT 10;"
+```
+
+Expected:
+
+- Foreign key to `devices`
+- One row per attempt, also for the blocked one
+
+To unblock the actuator, move it back to idle (section 21) and apply again.
+
+---
+
+# Command Testing (Phase 10 — Command)
+
+## 25. Test Command API
+
+Execute a command (command.json, with a real actuator id):
+
+```
+POST /api/commands
+```
+
+```json
+{ "command_type": "start_pump", "device_id": "<uuid>", "payload": {} }
+```
+
+Expected on an idle actuator: `200 OK`
+
+```json
+{
+  "id": "<uuid>",
+  "command_type": "start_pump",
+  "device_id": "<uuid>",
+  "payload": {},
+  "status": "success",
+  "error_message": null,
+  "created_at": "..."
+}
+```
+
+Verify:
+
+- After `start_pump` the actuator state is `running` and `allowed_commands` contains `stop_pump`
+- `start_pump` again returns `409` with `"status": "rejected"` and the state stays `running`
+- `stop_pump` returns `200` with `"status": "success"` and the state is `idle`
+- `set_light_level` without a payload stores `{"level": 1}`
+- An actuator running for 30 minutes returns `200` with `"status": "failed"` and `Max run time exceeded`
+- An unknown `command_type` returns `400` and adds no row
+- A sensor id or a missing id returns `404`
+
+---
+
+## 26. Test Command History
+
+```
+GET /api/commands?limit=50
+```
+
+Expected: newest first, including rejected commands.
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d command_log"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT command_type, status, error_message, created_at FROM command_log ORDER BY created_at DESC LIMIT 10;"
+```
+
+Expected:
+
+- Foreign key to `devices`
+- One row per command with status success, failed or rejected
+- A rejected command has no row in `actuator_execution_log`
+
+---
+
+# Observer Testing (Phase 11 — Observer)
+
+## 27. Create a Threshold Alert
+
+Raise a zone's low threshold above the simulation moisture range (0.2–0.6) with `alert-zone.json`:
+
+```
+PATCH /api/locations/{location_id}/zones/{zone_id}
+```
+
+```json
+{ "name": "Alert Demo Zone", "moisture_threshold_low": 0.7, "moisture_threshold_high": 0.9, "schedule": {} }
+```
+
+Make sure a simulation moisture sensor is assigned to that zone and has tracking enabled, then press **Read now** on it (or `POST /api/sensors/{sensor_id}/read`).
+
+```
+GET /api/alerts
+```
+
+Expected: `200 OK`, newest first
+
+```json
+[
+  {
+    "id": "<uuid>",
+    "location_id": "<uuid>",
+    "zone_id": "<uuid>",
+    "device_id": "<uuid>",
+    "severity": "warning",
+    "message": "Moisture below zone low",
+    "event_type": "threshold.crossed",
+    "status": "active",
+    "created_at": "..."
+  }
+]
+```
+
+Verify:
+
+- A reading equal to or above the zone low creates no alert
+- A sensor with tracking disabled creates no alert
+- A temperature reading creates no alert
+
+---
+
+## 28. Command and State Alerts
+
+Verify:
+
+- A failed command (for example `stop_pump` on a pump that has been running for 30 minutes) adds a `warning` alert with `Max run time exceeded` and `command.failed`
+- A rejected command adds no alert
+- Moving an actuator to `error` adds a `critical` alert with `Actuator entered error` and `state.changed`
+- Moving an actuator to any other state adds no alert
+- An actuator without a zone gives an alert with `location_id` and `zone_id` set to null
+
+Filters:
+
+```
+GET /api/alerts?location_id=<uuid>
+GET /api/alerts?zone_id=<uuid>
+GET /api/alerts?status=all&limit=10
+GET /api/alerts?status=wrong        → 400
+```
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "\d alerts"
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT severity, event_type, message, status, created_at FROM alerts ORDER BY created_at DESC LIMIT 10;"
+```
+
+Expected:
+
+- Foreign keys to `locations`, `zones` and `devices` with ON DELETE SET NULL
+- `status` is `active` for new alerts
+
+---
+
+# Frontend Testing
+
+## 29. Test Dashboard
+
+Open:
+
+```
+http://localhost:5173/dashboard
+```
+
+Verify:
+
+ API: ok · DB: ok badge  
+ Sensors section loads  
+ Devices section loads  
+ Simulation devices display  
+ Device information displays correctly  
+ Saved data remains after refresh  
+ Sensor cards show latest value and source badge  
+ "Read now" stores a new reading  
+ Interval and tracking can be changed on each sensor card  
+ Automation strategy panel shows locations and strategies  
+ "Save strategy" saves the selected strategy  
+ "Evaluate" shows irrigate or wait with a reason per zone  
+ Overview panel shows sensor and actuator counts  
+ Overview panel shows strategy and recommendation, or an empty state  
+ Overview panel shows one card per zone with devices and readings  
+ Refresh loads the overview again  
+ Actuator cards show a state badge  
+ Hovering the badge shows the allowed commands  
+ "Move to" with a legal state updates the badge  
+ "Move to" with an illegal state shows the reason  
+ Overview zone cards show the new state after Refresh  
+ Execution log block shows the instruction text and an empty state or rows  
+ "Apply command" adds a success row with policy logging and an empty message  
+ A blocked attempt shows the reason and a failed row after Refresh  
+ Controls show every actuator with its state and three command buttons  
+ A button is disabled when its command is not allowed  
+ After Start pump, Stop pump becomes available and the history shows success  
+ Command history shows success, failed and rejected rows  
+ Events block shows active alerts or an empty state  
+ A new alert appears within 5 seconds without a page reload  
+ Location and zone filters narrow the list  
+ Severity badges show warning and critical  
+
+---
+
+# Database Verification
+
+## 30. Check Database Records
+
+Devices:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM devices;"
+```
+
+Locations:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM locations;"
+```
+
+Zones:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM zones;"
+```
+
+Actuator states:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM actuator_states;"
+```
+
+Actuator execution log:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM actuator_execution_log ORDER BY created_at DESC LIMIT 10;"
+```
+
+Alerts:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM alerts ORDER BY created_at DESC LIMIT 10;"
+```
+
+Command log:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM command_log ORDER BY created_at DESC LIMIT 10;"
+```
+
+Sensor readings:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM sensor_readings ORDER BY recorded_at DESC LIMIT 10;"
+```
+
+Automation rules:
+
+```powershell
+docker compose exec postgres psql -U greenhouse -d greenhouse -c "SELECT * FROM automation_rules;"
+```
+
+---
+
+# Quality Checks
+
+## 31. Backend Tests
+
+Run:
+
+```powershell
+docker compose exec backend pytest tests -q
+```
+
+Expected:
+
+```
+All tests passed, none skipped
+```
+
+---
+
+## 32. Backend Lint
+
+Run:
+
+```powershell
+docker compose exec backend ruff check src alembic tests
+```
+
+---
+
+## 33. Frontend Check
+
+Go to frontend:
+
+```powershell
+cd frontend
+```
+
+Install packages:
+
+```powershell
+npm install
+```
+
+Build:
+
+```powershell
+npm run build
+```
+
+Lint:
+
+```powershell
+npm run lint
+```
+
+---
+
+# Phase 11 Final Checklist
+
+## Phases 1–4
+
+☑ Docker services running  
+☑ Database migration completed (011 head)  
+☑ Backend health check passes  
+☑ Scalar API documentation works  
+☑ Device API works  
+☑ Factory Method creates devices  
+☑ Sensors and actuators display correctly  
+☑ Location configuration works  
+☑ Zone create/update/delete works  
+☑ Device-zone assignment works  
+☑ Zone device listing works  
+☑ PostgreSQL stores data correctly  
+☑ Frontend dashboard works  
+
+## Phase 5 — Adapter
+
+☑ "Read now" stores a reading and returns 201  
+☑ Reading shows value, unit, source and time  
+☑ Simulation and vendor adapters give different sources  
+☑ Missing device returns 404  
+☑ Sampling interval and tracking are saved  
+☑ Interval below 5 returns 400  
+☑ Sampler adds readings only when tracking is on  
+☑ Latest reading stays after refresh  
+☑ `sensor_readings` table has foreign key and index  
+
+## Phase 6 — Strategy
+
+☑ Strategy list shows conservative and aggressive  
+☑ Strategy is saved per location in `automation_rules`  
+☑ Evaluate uses the saved strategy  
+☑ Evaluate uses zone thresholds and the latest stored reading  
+☑ Same moisture gives wait with conservative and irrigate with aggressive  
+☑ Zone without moisture sensor returns wait  
+☑ Unknown strategy returns 400  
+☑ Missing location returns 404  
+☑ Strategy panel can save and evaluate  
+
+## Phase 7 — Facade
+
+☑ Overview endpoint returns one DTO for a location  
+☑ Overview handler calls only the facade  
+☑ Every zone is listed, also an empty zone  
+☑ Only assigned devices are counted and listed  
+☑ Latest readings are listed per zone with tracking and interval  
+☑ No saved strategy returns 200 with null strategy fields  
+☑ Recommendation matches evaluate  
+☑ Missing location returns 404  
+☑ Overview panel uses one request, Refresh repeats it  
+☑ No new table was added in Phase 7  
+
+## Phase 8 — State
+
+☑ `actuator_states` has one row per actuator  
+☑ Existing actuators were seeded to idle  
+☑ Legal transitions are saved  
+☑ Illegal transitions return 409 and are not saved  
+☑ Device list shows `state` and `allowed_commands`  
+☑ States are the same after a backend restart  
+☑ Dashboard shows state badges with allowed commands  
+
+## Phase 9 — Decorator
+
+☑ Apply goes through the decorated actuator port  
+☑ Every attempt adds a row to `actuator_execution_log`  
+☑ Success row has policy logging and an empty message  
+☑ Blocked attempt returns 409 and adds a failed row with maxRunTime and logging  
+☑ Blocked attempt does not reach the adapter  
+☑ Executions endpoint lists the newest rows first  
+☑ Dashboard shows the execution log  
+
+## Phase 10 — Command
+
+☑ Commands are objects created from the type string  
+☑ Start pump changes the state to running and writes a success row  
+☑ An illegal command returns 409, writes a rejected row and does not change the state  
+☑ Max run time writes a failed row and leaves the state unchanged  
+☑ Unknown command type returns 400 and writes no row  
+☑ Command history lists the newest rows first  
+☑ Control buttons follow `allowed_commands`  
+
+## Phase 11 — Observer
+
+☑ Publishers publish events and do not import the alert code  
+☑ Moisture below the zone low creates a warning alert  
+☑ A failed command creates a warning alert  
+☑ An actuator in error creates a critical alert  
+☑ A rejected command and a normal state change create no alert  
+☑ One failing subscriber does not stop the others or the request  
+☑ `GET /api/alerts` filters by status, location and zone  
+☑ Events feed refreshes every 5 seconds  
+
+## Quality
+
+☑ Backend tests pass  
+☑ Frontend build passes  
+
+# Phase 11 Complete

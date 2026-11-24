@@ -1,0 +1,5 @@
+{
+  "command_type": "start_pump",
+  "device_id": "PUT-ACTUATOR-ID-HERE",
+  "payload": {}
+}
